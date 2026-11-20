@@ -181,3 +181,21 @@ where
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
+
+/// Write a config dir of profiles: `(type_dir, name, json)` per profile.
+pub fn write_config(dir: &Path, profiles: &[(&str, &str, serde_json::Value)]) {
+    for (kind, name, value) in profiles {
+        let d = dir.join(kind);
+        std::fs::create_dir_all(&d).expect("create profile dir");
+        std::fs::write(d.join(format!("{name}.json")), serde_json::to_vec_pretty(value).unwrap()).expect("write");
+    }
+}
+
+/// Write an executable shell script and return its path.
+pub fn write_script(dir: &Path, name: &str, body: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join(name);
+    std::fs::write(&path, body).expect("write script");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
+    path
+}
