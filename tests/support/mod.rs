@@ -25,3 +25,5 @@ pub async fn wait_for_path(path: &Path, timeout: Duration) {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
+
+pub mod fake_llm;
