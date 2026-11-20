@@ -7,6 +7,8 @@ mod run;
 
 pub use run::{RunError, run};
 
+pub(crate) mod mcp;
+
 mod send;
 
 pub(crate) use send::{SendPayload, send_arguments, send_spec};

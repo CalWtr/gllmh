@@ -77,6 +77,7 @@ pub struct Valet {
     pub broker: Peer,
     pub clients: Clients,
     executable_schemas: BTreeMap<PathBuf, tools::ExecutableSchema>,
+    mcp_tools: Vec<crate::tools::mcp::DiscoveredTool>,
     /// Flips to true once recovery is done; deliveries wait for it.
     recovered: watch::Sender<bool>,
     /// Wakes the turn engine when a turn is queued or ends.
@@ -116,6 +117,7 @@ pub async fn run(args: ValetArgs) -> anyhow::Result<()> {
         None => paths::expand_home(&profile.user_data_store, &home_dir()),
     };
     let store = StoreHandle::open(&data_dir).await.with_context(|| format!("open store in {}", data_dir.display()))?;
+    let mcp_tools = tools::load_mcp_tools(&profile, &data_dir).await;
 
     let (recovered, _) = watch::channel(false);
     let valet = Arc::new(Valet {
@@ -128,6 +130,7 @@ pub async fn run(args: ValetArgs) -> anyhow::Result<()> {
         broker: peer,
         clients: Clients::default(),
         executable_schemas,
+        mcp_tools,
         recovered,
         wake: tokio::sync::Notify::new(),
     });
