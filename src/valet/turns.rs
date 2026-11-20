@@ -11,6 +11,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use tokio::task::JoinSet;
@@ -18,15 +19,15 @@ use tokio::task::JoinSet;
 use crate::frame::ErrorBody;
 use crate::llm::{self, LlmConfig};
 use crate::profile::ComposerProfile;
-use crate::protocol::broker::{self, CloseInput, CloseOutput};
+use crate::protocol::broker::{self, CloseInput, CloseOutput, LookupInput, LookupOutput};
 use crate::protocol::composer::{BlockType, ComposeOutput, Stop, codes as compose_codes};
 use crate::protocol::records::{LlmCallError, LlmCallFailure, LlmCallInput, LlmCallOutput, Usage};
 use crate::store::ActionRequest;
-use crate::types::{ActionKind, Interaction, InteractionId, Outcome, TurnOutcome};
+use crate::types::{ActionKind, Interaction, InteractionId, InteractionKind, Outcome, TurnOutcome};
 
-use super::Valet;
 use super::composer::Composer;
 use super::tools::{ToolCtx, ToolUse};
+use super::{SendRequest, Valet};
 
 /// A running turn engine; resolves when it stops (the composer exited).
 pub struct Engine {
@@ -54,6 +55,13 @@ pub async fn start(valet: &Arc<Valet>) -> anyhow::Result<Engine> {
     };
     let (composer, mut child) = Composer::start(valet, &profile).await?;
     let ctx = Arc::new(TurnRunner { valet: valet.clone(), composer, profile });
+
+    // Send recovery has already resolved any ambiguously accepted results.
+    for (directive, turn, text) in valet.store.with(|s| s.unclosed_directives()).await? {
+        if let Some(outcome) = turn.state.turn_outcome() {
+            valet.on_turn_end(&directive, &TurnEnd { outcome, text }).await;
+        }
+    }
 
     // Step 5: a running turn whose tool call was in flight cannot resume.
     let mut resume = Vec::new();
@@ -309,33 +317,102 @@ impl TurnRunner {
         }
     }
 
-    /// End a turn: record the end state, let results go out (M6.1), close the
-    /// interaction with the turn's outcome.
+    /// Record the outcome before sending any owed result, then close.
     async fn end(&self, trigger: InteractionId, end: TurnEnd) {
-        let outcome = end.outcome;
-        if let Err(e) = self.valet.store.with(move |s| s.end_turn(trigger, outcome)).await {
-            tracing::error!(turn = %trigger, "could not record turn end: {e}");
+        if let Err(e) = self.record_end(trigger, end).await {
+            tracing::error!(turn = %trigger, "could not finish turn: {e:#}");
         }
-        tracing::info!(turn = %trigger, outcome = %outcome, "turn ended");
+    }
+
+    async fn record_end(&self, trigger: InteractionId, end: TurnEnd) -> anyhow::Result<()> {
+        let outcome = end.outcome;
+        let result_text = end.text.clone();
         let interaction = self
             .valet
             .store
-            .with(move |s| s.receive_action(trigger))
-            .await
-            .ok()
-            .flatten()
-            .and_then(|a| serde_json::from_value::<Interaction>(a.input).ok());
-        if let Some(interaction) = &interaction {
-            self.valet.on_turn_end(interaction, &end).await;
+            .with(move |s| -> anyhow::Result<_> {
+                let receive = s.receive_action(trigger)?.context("turn's receive action missing")?;
+                let interaction: Interaction = serde_json::from_value(receive.input)?;
+                if interaction.kind == InteractionKind::Directive {
+                    s.end_directive(trigger, outcome, result_text.as_deref())?;
+                } else {
+                    s.end_turn(trigger, outcome)?;
+                }
+                Ok(interaction)
+            })
+            .await?;
+        tracing::info!(turn = %trigger, outcome = %outcome, "turn ended");
+        if interaction.kind == InteractionKind::Directive {
+            self.valet.on_turn_end(&interaction, &end).await;
+        } else {
+            super::deliver::close(&self.valet, &interaction, outcome.into()).await;
         }
-        let close = CloseInput { id: trigger, outcome: Outcome::from(outcome) };
-        if let Err(e) = self.valet.broker.request::<_, CloseOutput>(broker::CLOSE, &close).await {
-            tracing::warn!(turn = %trigger, "close failed: {e}");
-        }
+        Ok(())
     }
 }
 
 impl Valet {
-    /// Hook for M6.1: a turn opened by a directive sends its result here.
-    pub async fn on_turn_end(&self, _trigger: &Interaction, _end: &TurnEnd) {}
+    /// Finish a directive's broker obligations, in order (sections 2 and 4).
+    async fn on_turn_end(&self, directive: &Interaction, end: &TurnEnd) {
+        if let Err(e) = self.send_result(directive, end).await {
+            tracing::error!(turn = %directive.id, outcome = %end.outcome, "directive result was not confirmed: {e:#}");
+            return;
+        }
+        self.close_directive(directive.id, end.outcome).await;
+    }
+
+    async fn send_result(&self, directive: &Interaction, end: &TurnEnd) -> anyhow::Result<()> {
+        let trigger = directive.id;
+        if self.store.with(move |s| s.has_sent_result(trigger)).await? {
+            return Ok(());
+        }
+
+        let mut req = SendRequest::new(InteractionKind::Result, &directive.from.user);
+        req.caused_by = Some(trigger);
+        req.turn_outcome = Some(end.outcome);
+        req.turn = Some(trigger);
+        req.root = Some(directive.root);
+        if end.outcome == TurnOutcome::Done {
+            req.body = end.text.clone().map(serde_json::Value::String);
+        }
+
+        // Allow about eight seconds for explicit retryable errors. An
+        // ambiguous send must be settled before creating a new send action.
+        let mut delays = [250, 500, 1000, 2000, 4000].into_iter();
+        loop {
+            let sent = self.send(req.clone()).await;
+            let Err(error) = sent.result else {
+                return Ok(());
+            };
+            if error.code == crate::protocol::local::codes::BROKER_UNAVAILABLE {
+                let id = sent.action;
+                let reply: LookupOutput = self.broker.request(broker::LOOKUP, &LookupInput { client_ref: id }).await?;
+                if reply.found {
+                    let accepted = reply.interaction.context("broker lookup omitted the accepted result")?;
+                    self.store.with(move |s| s.recover_send(id, &accepted)).await?;
+                    return Ok(());
+                }
+                self.store.with(move |s| s.interrupt_action(id)).await?;
+            }
+            let Some(ms) = delays.next().filter(|_| error.retry) else {
+                return Err(error.into());
+            };
+            tracing::warn!(turn = %trigger, "retrying directive result in {ms} ms: {error}");
+            tokio::time::sleep(Duration::from_millis(ms)).await;
+        }
+    }
+
+    /// Confirm the close only after the broker acknowledges it. On startup
+    /// a delivery whose ack was lost may still be waiting for redelivery.
+    pub(super) async fn close_directive(&self, trigger: InteractionId, outcome: TurnOutcome) {
+        let close = CloseInput { id: trigger, outcome: Outcome::from(outcome) };
+        match self.broker.request::<_, CloseOutput>(broker::CLOSE, &close).await {
+            Ok(_) => {
+                if let Err(e) = self.store.with(move |s| s.confirm_directive_close(trigger)).await {
+                    tracing::error!(turn = %trigger, "could not record directive close: {e}");
+                }
+            }
+            Err(e) => tracing::warn!(turn = %trigger, "directive close failed: {e}"),
+        }
+    }
 }

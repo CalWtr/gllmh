@@ -36,6 +36,12 @@ CREATE TABLE IF NOT EXISTS turn (
     ended_at  TEXT
 );
 
+CREATE TABLE IF NOT EXISTS directive_end (
+    trigger     TEXT NOT NULL PRIMARY KEY,
+    result_text TEXT,
+    closed      INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS mark (
     target TEXT NOT NULL,
     key    TEXT NOT NULL,
