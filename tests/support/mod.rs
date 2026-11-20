@@ -4,6 +4,8 @@
 
 #![allow(dead_code)]
 
+pub mod dev;
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
