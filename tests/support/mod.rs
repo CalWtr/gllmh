@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 pub mod dev;
+pub mod examples;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
