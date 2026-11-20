@@ -13,3 +13,4 @@ Spec gaps and the readings chosen for them, newest last. Spec:
 | 2026-11-20 | S0 | Error codes `bad_frame`, `unknown_op`, `bad_input`, `internal` on every line; `no_hello` on the broker line; `broker_unavailable`, `bad_kind` on submit. | The spec lists only op-specific codes; these cover malformed traffic. |
 | 2026-11-20 | S0 | `notify` is a request whose reply the valet ignores. | Section 6 frames are request/reply; a fire-and-forget op would be a fourth frame kind. |
 | 2026-11-20 | root | MCP over a unix socket is newline-delimited JSON-RPC, the stdio framing. | The spec names "a socket" without a transport. |
+| 2026-11-20 | M3.3 | Attach treats message text and directive block contents as strings. Directive arguments use shell-style quoting, and attach leaves `caused_by` unset. | The terminal syntax provides no causal parent or identity. The valet and broker remain responsible for identity, routing and causal metadata. |

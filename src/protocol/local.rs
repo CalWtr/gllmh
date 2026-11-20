@@ -31,6 +31,10 @@ pub struct NotifyInput {
     pub interaction: Interaction,
 }
 
+/// Acknowledges a notification received on this connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotifyOutput {}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SubmitInput {
     /// message or directive; a result is never submitted.
