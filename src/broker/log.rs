@@ -414,3 +414,267 @@ fn interaction_row(row: &Row<'_>) -> rusqlite::Result<Interaction> {
         closed_at: status.closed_at,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use serde_json::{Value, json};
+
+    use super::*;
+    use crate::types::{Block, TurnOutcome};
+
+    fn message(to: &str) -> SendInput {
+        SendInput {
+            client_ref: ActionId::new(),
+            kind: InteractionKind::Message,
+            to: to.into(),
+            service: None,
+            caused_by: None,
+            body: Some(json!({"message": "hello"})),
+            context: None,
+            turn_outcome: None,
+            local: false,
+        }
+    }
+
+    fn assert_state(log: &InteractionLog, id: InteractionId, state: InteractionState) {
+        assert_eq!(log.get(id).unwrap().unwrap().state, state);
+    }
+
+    fn assert_rejected(result: Result<(), LogError>) {
+        assert!(matches!(result, Err(LogError::InvalidTransition { .. })), "{result:?}");
+    }
+
+    #[test]
+    fn delivery_ack_and_close_require_the_expected_state() {
+        use InteractionState::{Accepted, Acked, Closed, Delivered};
+        let mut log = InteractionLog::open_in_memory().unwrap();
+        let row = log.accept(&Sender::user("alice"), &message("bob")).unwrap().interaction;
+        let id = row.id;
+
+        assert_rejected(log.mark_delivered(InteractionId::new()));
+        assert_rejected(log.ack(id));
+        assert_rejected(log.close(id, Outcome::Received));
+        assert_state(&log, id, Accepted);
+
+        log.mark_delivered(id).unwrap();
+        assert_rejected(log.mark_delivered(id));
+        assert_rejected(log.close(id, Outcome::Received));
+        assert_state(&log, id, Delivered);
+
+        log.ack(id).unwrap();
+        assert_rejected(log.mark_delivered(id));
+        assert_rejected(log.ack(id));
+        assert_state(&log, id, Acked);
+        assert_eq!(log.requeue_all_delivered().unwrap(), 0);
+
+        log.close(id, Outcome::Done).unwrap();
+        assert_rejected(log.mark_delivered(id));
+        assert_rejected(log.ack(id));
+        assert_rejected(log.close(id, Outcome::Failed));
+        assert_state(&log, id, Closed);
+        let closed = log.get(id).unwrap().unwrap();
+        assert_eq!(closed.outcome, Some(Outcome::Done));
+        assert!(closed.closed_at.is_some());
+        assert_eq!(
+            closed,
+            Interaction { state: Closed, outcome: Some(Outcome::Done), closed_at: closed.closed_at, ..row }
+        );
+    }
+
+    #[test]
+    fn deliver_oldest_first_and_requeue_only_the_disconnected_recipient() {
+        let mut log = InteractionLog::open_in_memory().unwrap();
+        let from = Sender::user("alice");
+        let first = log.accept(&from, &message("bob")).unwrap().interaction;
+        let other = log.accept(&from, &message("carol")).unwrap().interaction;
+        let second = log.accept(&from, &message("bob")).unwrap().interaction;
+
+        assert_eq!(log.next_deliverable("bob").unwrap(), Some(first.clone()));
+        log.mark_delivered(first.id).unwrap();
+        log.mark_delivered(other.id).unwrap();
+        assert_eq!(log.next_deliverable("bob").unwrap(), Some(second));
+        assert_eq!(log.requeue_delivered("bob").unwrap(), 1);
+        assert_eq!(log.requeue_delivered("bob").unwrap(), 0);
+        assert_eq!(log.next_deliverable("bob").unwrap(), Some(first));
+        assert!(log.next_deliverable("carol").unwrap().is_none());
+        assert_state(&log, other.id, InteractionState::Delivered);
+    }
+
+    #[test]
+    fn duplicate_returns_the_original_row_and_is_scoped_to_the_full_sender() {
+        let mut log = InteractionLog::open_in_memory().unwrap();
+        let from = Sender::user("alice");
+        let mut input = message("bob");
+        assert!(log.lookup(&from, input.client_ref).unwrap().is_none());
+        let first = log.accept(&from, &input).unwrap();
+        assert!(!first.duplicate);
+        log.mark_delivered(first.interaction.id).unwrap();
+        let stored = Interaction { state: InteractionState::Delivered, ..first.interaction };
+
+        input.to = "carol".into();
+        input.body = Some(json!("changed"));
+        input.caused_by = Some(InteractionId::new());
+        let replay = log.accept(&from, &input).unwrap();
+        assert!(replay.duplicate);
+        assert_eq!(replay.interaction, stored);
+        assert_eq!(log.lookup(&from, input.client_ref).unwrap(), Some(stored.clone()));
+
+        input.caused_by = None;
+        let service = Sender::service("alice", "timer");
+        input.service = service.service.clone();
+        let separate = log.accept(&service, &input).unwrap();
+        assert!(!separate.duplicate);
+        assert_ne!(separate.interaction.id, stored.id);
+    }
+
+    #[test]
+    fn causality_retains_root_and_local_resets_hops() {
+        let mut log = InteractionLog::open_in_memory().unwrap();
+        let root = log.accept(&Sender::service("alice", "timer"), &message("bob")).unwrap().interaction;
+        assert_eq!((root.root, root.hops), (root.id, 0));
+
+        let mut input = message("carol");
+        input.caused_by = Some(root.id);
+        let child = log.accept(&Sender::user("bob"), &input).unwrap().interaction;
+        assert_eq!((child.root, child.hops), (root.id, 1));
+
+        let mut input = message("dana");
+        input.caused_by = Some(child.id);
+        input.local = true;
+        let local = log.accept(&Sender::user("carol"), &input).unwrap().interaction;
+        assert_eq!((local.root, local.hops), (root.id, 0));
+
+        let mut input = message("alice");
+        input.caused_by = Some(local.id);
+        let next = log.accept(&Sender::user("dana"), &input).unwrap().interaction;
+        assert_eq!((next.root, next.hops), (root.id, 1));
+
+        assert_eq!(
+            log.by_root(root.id).unwrap(),
+            [&root, &child, &local, &next].into_iter().map(StatusRow::from).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            log.participants(root.id).unwrap(),
+            ["alice", "bob", "carol", "dana"].map(String::from).into_iter().collect::<BTreeSet<_>>()
+        );
+        let missing = InteractionId::new();
+        assert!(log.get(missing).unwrap().is_none());
+        assert!(log.by_root(missing).unwrap().is_empty());
+        assert!(log.participants(missing).unwrap().is_empty());
+        input.client_ref = ActionId::new();
+        input.caused_by = Some(missing);
+        assert!(matches!(log.accept(&Sender::user("dana"), &input), Err(LogError::UnknownParent(id)) if id == missing));
+        assert!(log.lookup(&Sender::user("dana"), input.client_ref).unwrap().is_none());
+    }
+
+    #[test]
+    fn expiry_moves_only_accepted_rows_to_dead_at_the_ttl_boundary() {
+        let mut log = InteractionLog::open_in_memory().unwrap();
+        let from = Sender::user("alice");
+        let accepted = log.accept(&from, &message("bob")).unwrap().interaction;
+        let delivered = log.accept(&from, &message("bob")).unwrap().interaction;
+        let acked = log.accept(&from, &message("bob")).unwrap().interaction;
+        let closed = log.accept(&from, &message("bob")).unwrap().interaction;
+        for id in [delivered.id, acked.id, closed.id] {
+            log.mark_delivered(id).unwrap();
+        }
+        log.ack(acked.id).unwrap();
+        log.ack(closed.id).unwrap();
+        log.close(closed.id, Outcome::Received).unwrap();
+
+        let boundary = accepted.accepted_at + TimeDelta::seconds(10);
+        assert_eq!(log.expire(10, boundary - TimeDelta::nanoseconds(1)).unwrap(), 0);
+        assert_eq!(log.expire(u64::MAX, boundary).unwrap(), 0);
+        assert_eq!(log.expire(10, boundary).unwrap(), 1);
+        assert_eq!(log.expire(10, boundary).unwrap(), 0);
+        let dead = log.get(accepted.id).unwrap().unwrap();
+        assert_eq!(dead, Interaction { state: InteractionState::Dead, ..accepted });
+        assert_rejected(log.mark_delivered(dead.id));
+        assert_rejected(log.ack(dead.id));
+        assert_rejected(log.close(dead.id, Outcome::Failed));
+        assert_state(&log, delivered.id, InteractionState::Delivered);
+        assert_state(&log, acked.id, InteractionState::Acked);
+        assert_state(&log, closed.id, InteractionState::Closed);
+        assert!(log.next_deliverable("bob").unwrap().is_none());
+    }
+
+    #[test]
+    fn result_owed_requires_the_directive_recipient_and_one_answer() {
+        let mut log = InteractionLog::open_in_memory().unwrap();
+        let director = Sender::service("alice", "timer");
+        let worker = Sender::user("bob");
+        let ordinary = log.accept(&director, &message("bob")).unwrap().interaction;
+        let mut input = message("bob");
+        input.kind = InteractionKind::Directive;
+        input.body = None;
+        input.context = Some(vec![Block { name: "instructions".into(), content: "work".into() }]);
+        let directive = log.accept(&director, &input).unwrap().interaction;
+        assert_eq!(log.get(directive.id).unwrap(), Some(directive.clone()));
+        assert!(!log.result_owed(InteractionId::new(), "bob").unwrap());
+        assert!(!log.result_owed(ordinary.id, "bob").unwrap());
+        assert!(!log.result_owed(directive.id, "carol").unwrap());
+        assert!(log.result_owed(directive.id, "bob").unwrap());
+
+        let mut result = message("alice");
+        result.kind = InteractionKind::Result;
+        result.turn_outcome = Some(TurnOutcome::Failed);
+        result.body = Some(Value::Null);
+        assert!(matches!(log.accept(&worker, &result), Err(LogError::NotOwed)));
+        result.caused_by = Some(ordinary.id);
+        assert!(matches!(log.accept(&worker, &result), Err(LogError::NotOwed)));
+        result.caused_by = Some(directive.id);
+        assert!(matches!(log.accept(&Sender::user("carol"), &result), Err(LogError::NotOwed)));
+        assert!(matches!(log.accept(&Sender::service("bob", "timer"), &result), Err(LogError::NotOwed)));
+        result.to = "carol".into();
+        assert!(matches!(log.accept(&worker, &result), Err(LogError::NotOwed)));
+        assert!(log.result_owed(directive.id, "bob").unwrap());
+        assert!(log.lookup(&worker, result.client_ref).unwrap().is_none());
+
+        result.to = "alice".into();
+        let answer = log.accept(&worker, &result).unwrap().interaction;
+        assert_eq!((answer.root, answer.hops), (directive.id, 1));
+        assert_eq!(log.get(answer.id).unwrap(), Some(answer.clone()));
+        assert!(!log.result_owed(directive.id, "bob").unwrap());
+        assert!(log.accept(&worker, &result).unwrap().duplicate);
+        log.expire(0, answer.accepted_at).unwrap();
+        assert_state(&log, answer.id, InteractionState::Dead);
+        assert!(!log.result_owed(directive.id, "bob").unwrap());
+        result.client_ref = ActionId::new();
+        assert!(matches!(log.accept(&worker, &result), Err(LogError::NotOwed)));
+    }
+
+    #[test]
+    fn file_reopens_in_wal_mode_and_recovers_only_delivered_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("broker.db");
+        let from = Sender::user("alice");
+        let (first, second, acked) = {
+            let mut log = InteractionLog::open(&path).unwrap();
+            assert_eq!(path.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(
+                log.conn.pragma_query_value(None, "journal_mode", |row| row.get::<_, String>(0)).unwrap(),
+                "wal"
+            );
+            let first = log.accept(&from, &message("bob")).unwrap().interaction;
+            let second = log.accept(&from, &message("carol")).unwrap().interaction;
+            let acked = log.accept(&from, &message("bob")).unwrap().interaction;
+            for id in [first.id, second.id, acked.id] {
+                log.mark_delivered(id).unwrap();
+            }
+            log.ack(acked.id).unwrap();
+            (first, second, acked)
+        };
+
+        let log = InteractionLog::open(&path).unwrap();
+        assert_state(&log, first.id, InteractionState::Delivered);
+        assert_state(&log, second.id, InteractionState::Delivered);
+        assert_eq!(log.requeue_all_delivered().unwrap(), 2);
+        assert_eq!(log.requeue_all_delivered().unwrap(), 0);
+        assert_eq!(log.lookup(&from, first.client_ref).unwrap(), Some(first.clone()));
+        assert_eq!(log.next_deliverable("bob").unwrap(), Some(first));
+        assert_eq!(log.next_deliverable("carol").unwrap(), Some(second));
+        assert_state(&log, acked.id, InteractionState::Acked);
+    }
+}
