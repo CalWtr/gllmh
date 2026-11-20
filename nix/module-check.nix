@@ -7,9 +7,9 @@ let
   evaluatedSystem = builtins.unsafeDiscardStringContext toplevel.drvPath;
   units = cfg.environment.etc."systemd/system".source;
 in
-assert cfg.users.users.agent.isSystemUser && cfg.users.users.worker_agent.createHome;
-assert cfg.environment.etc."gllmh/llm/anthropic.json".mode == "0640";
-assert cfg.environment.etc."gllmh/llm/anthropic.json".group == "gllmh";
+assert cfg.users.users.gllmh-agent.isSystemUser && cfg.users.users.gllmh-worker.createHome;
+assert cfg.environment.etc."gllmh/llm/deepseek-anthropic.json".mode == "0640";
+assert cfg.environment.etc."gllmh/llm/deepseek-openai.json".group == "gllmh";
 runCommand "gllmh-module-eval" { inherit evaluatedSystem; } ''
   units=${units}
   test -e "$units/multi-user.target.wants/gllmh.target"
@@ -19,7 +19,7 @@ runCommand "gllmh-module-eval" { inherit evaluatedSystem; } ''
   grep -Fx 'Wants=gllmh-valet-agent.service' "$dependencies"
   grep -Fx 'Requires=gllmh-service-agent::timer.service' "$dependencies"
   grep -Fx 'Requires=gllmh-service-dispatch::draft_dispatcher.service' "$dependencies"
-  grep -Fx 'WorkingDirectory=/var/lib/gllmh-users/agent/.gllmh' "$units/gllmh-valet-agent.service"
+  grep -Fx 'WorkingDirectory=/var/lib/gllmh-users/gllmh-agent/.gllmh' "$units/gllmh-valet-agent.service"
   grep -E '^ExecStart=/nix/store/[^ ]+/bin/gllmh-timer$' "$units/gllmh-service-agent::timer.service"
   grep -E '^ExecStart=/nix/store/[^ ]+/bin/gllmh-draft-dispatcher$' "$units/gllmh-service-dispatch::draft_dispatcher.service"
   printf '%s\n' "$evaluatedSystem" > "$out"
