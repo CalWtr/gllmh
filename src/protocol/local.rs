@@ -10,7 +10,8 @@ use crate::types::{Block, Interaction, InteractionId, InteractionKind};
 
 pub use super::broker::{SendOutput as SubmitOutput, StatusInput, StatusOutput};
 
-/// valet → client: a request whose reply is ignored (the client answers `{}`).
+/// valet → client: the client answers `{}`. The valet ignores UI/controller
+/// replies and uses service replies to confirm result forwarding.
 pub const NOTIFY: &str = "notify";
 pub const SUBMIT: &str = "submit";
 /// Forwarded to the broker as its `status`.

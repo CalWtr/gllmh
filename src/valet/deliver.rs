@@ -10,15 +10,33 @@ use crate::protocol::broker::{self, CloseInput, CloseOutput, DeliverOutput};
 use crate::store::ReceiveOutcome;
 use crate::types::{Interaction, InteractionKind, Outcome};
 
-use super::Valet;
+use super::{Valet, services};
 
 pub async fn handle(valet: &Valet, interaction: Interaction, responder: Responder) {
     valet.wait_recovered().await;
 
-    let open_turn = valet.opens_turn(&interaction);
+    let service = match (interaction.kind, interaction.caused_by) {
+        (InteractionKind::Result, Some(cause)) => match services::director(valet, cause).await {
+            Ok(service) => service,
+            Err(e) => {
+                tracing::error!(id = %interaction.id, "could not identify result director: {e:#}");
+                responder.err(ErrorBody::retryable(broker::codes::STORE_FAILED, e.to_string()));
+                return;
+            }
+        },
+        _ => None,
+    };
+    let open_turn = valet.opens_turn(service.as_deref());
     let recorded = {
         let interaction = interaction.clone();
-        valet.store.with(move |s| s.record_receive(&interaction, open_turn)).await
+        let service = service.clone();
+        valet
+            .store
+            .with(move |s| match service {
+                Some(name) => s.record_service_result(&interaction, &name),
+                None => s.record_receive(&interaction, open_turn),
+            })
+            .await
     };
     let outcome = match recorded {
         Ok(outcome) => outcome,
@@ -29,6 +47,11 @@ pub async fn handle(valet: &Valet, interaction: Interaction, responder: Responde
         }
     };
     responder.ok(DeliverOutput {});
+
+    if let Some(name) = service {
+        valet.services.wake(&name);
+        return;
+    }
 
     if outcome == ReceiveOutcome::Duplicate {
         // Already recorded before a crash or reconnect. For an agent its turn
@@ -79,7 +102,7 @@ pub async fn close(valet: &Valet, interaction: &Interaction, outcome: Outcome) {
 impl Valet {
     /// Whether a received interaction opens a turn here: on an agent, always,
     /// except a result for a directive one of this user's services sent (M7.1).
-    pub fn opens_turn(&self, _interaction: &Interaction) -> bool {
-        self.is_agent()
+    fn opens_turn(&self, service_director: Option<&str>) -> bool {
+        self.is_agent() && service_director.is_none()
     }
 }

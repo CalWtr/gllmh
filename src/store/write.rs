@@ -237,6 +237,59 @@ impl Store {
     /// Record a succeeded receive and optionally open its queued turn in the
     /// same transaction. The valet can acknowledge delivery after this returns.
     pub fn record_receive(&mut self, interaction: &Interaction, open_turn: bool) -> Result<ReceiveOutcome> {
+        self.write_receive(interaction, open_turn, None)
+    }
+
+    /// The service that sent the given directive, if it was a service submit.
+    pub fn service_director(&self, directive: InteractionId) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT service FROM action WHERE interaction = ?1 AND kind = 'send' AND service IS NOT NULL
+             AND state = 'succeeded' AND json_extract(input, '$.kind') = 'directive'",
+                [directive.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// EXTENSION: commit the service's notification queue entry with the receive.
+    pub fn record_service_result(&mut self, interaction: &Interaction, service: &str) -> Result<ReceiveOutcome> {
+        self.write_receive(interaction, false, Some(service))
+    }
+
+    /// Pending results in receive order, with unfinished closes first.
+    pub fn pending_service_results(
+        &self,
+        service: &str,
+        forwarded_only: bool,
+    ) -> Result<Vec<(ActionId, Interaction, bool)>> {
+        let rows: Vec<(ActionId, String, bool)> = read_all(
+            &self.conn,
+            "SELECT a.id, a.input, r.forwarded FROM service_result r JOIN action a ON a.id = r.receive
+             WHERE r.service = ?1 AND r.forwarded >= ?2 ORDER BY r.forwarded DESC, r.receive",
+            params![service, forwarded_only],
+            |row| Ok((text(row, "id")?, row.get(1)?, row.get(2)?)),
+        )?;
+        rows.into_iter().map(|(id, input, forwarded)| Ok((id, serde_json::from_str(&input)?, forwarded))).collect()
+    }
+
+    pub fn mark_service_result_forwarded(&self, receive: ActionId) -> Result<()> {
+        self.conn.execute("UPDATE service_result SET forwarded = 1 WHERE receive = ?1", [receive.to_string()])?;
+        Ok(())
+    }
+
+    pub fn finish_service_result(&self, receive: ActionId) -> Result<()> {
+        self.conn.execute("DELETE FROM service_result WHERE receive = ?1", [receive.to_string()])?;
+        Ok(())
+    }
+
+    fn write_receive(
+        &mut self,
+        interaction: &Interaction,
+        open_turn: bool,
+        service: Option<&str>,
+    ) -> Result<ReceiveOutcome> {
         let id = self.next_id()?;
         let trigger = interaction.id.to_string();
         let root = interaction.root.to_string();
@@ -262,6 +315,12 @@ impl Store {
             tx.execute(
                 "INSERT INTO turn (trigger, root, state, steps, opened_at) VALUES (?1, ?2, 'queued', 0, ?3)",
                 params![trigger, root, at],
+            )?;
+        }
+        if let Some(service) = service {
+            tx.execute(
+                "INSERT INTO service_result (receive, service) VALUES (?1, ?2)",
+                params![id.to_string(), service],
             )?;
         }
         tx.commit()?;
