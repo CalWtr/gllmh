@@ -11,8 +11,27 @@ in
     profile = "acceptance";
 
     profiles = lib.recursiveUpdate fixtures {
-      user.agent.services.timer.command = "${services}/bin/gllmh-timer";
-      user.dispatch.services.draft_dispatcher.command = "${services}/bin/gllmh-draft-dispatcher";
+      user.agent.services.timer = {
+        command = "${services}/bin/gllmh-timer";
+        config = {
+          to = "agent";
+          delay_s = 0;
+          body = ''
+            Use send_directive to ask worker_agent for a two-sentence outline of a garden plan.
+            When the result arrives, use send_message to forward it to user.
+          '';
+        };
+      };
+      user.dispatch.services.draft_dispatcher = {
+        command = "${services}/bin/gllmh-draft-dispatcher";
+        config = {
+          to = "worker_agent";
+          context = [{
+            name = "instructions";
+            content = "Draft a short outline for a guide to planning a library reading group.";
+          }];
+        };
+      };
       user.worker_agent.llm_profiles = [ "anthropic-worker" ];
 
       # Each key must be owned by the user who reads it.

@@ -13,8 +13,8 @@ inputs.gllmh.url = "git+file:///home/caleb/repositories/gllmh?ref=gllmh/a3";
 ```
 
 Bind the input in the existing `outputs` arguments, for example
-`outputs = { self, nixpkgs, gllmh, ... }: ...`, and add this entry to
-`nixosConfigurations.<PC-1-hostname>.modules`:
+`outputs = { self, nixpkgs, gllmh, ... }: ...`. Add this entry to the
+`modules` argument of the `nixosSystem` call for PC-1.
 
 ```nix
 gllmh.nixosModules.acceptance
@@ -62,7 +62,9 @@ sudo journalctl -u 'gllmh-service-agent::timer.service'
 sudo systemctl stop gllmh.target
 ```
 
-Use `sudo -u user -H gllmh attach` to attach as the acceptance user.
+Use `sudo -u user -H gllmh attach` to attach as the acceptance user. The timer
+submits one message per service start, and the dispatcher writes its result
+to the journal under `gllmh-service-dispatch::draft_dispatcher.service`.
 
 ## Configure a different runtime
 
@@ -94,4 +96,5 @@ profiles. Provider keys belong in agent-owned files outside the store.
 NixOS installs the profile copies under `/etc/gllmh` as `root:gllmh`, with
 `0750` directories and `0640` files. Change profiles in the host configuration
 and build a new generation so the generated units and installed profiles
-come from the same source.
+come from the same source. After activating a changed profile, restart
+`gllmh.target` so the broker and valets load it.
