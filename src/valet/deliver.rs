@@ -8,7 +8,7 @@
 use crate::frame::{ErrorBody, Responder};
 use crate::protocol::broker::{self, CloseInput, CloseOutput, DeliverOutput};
 use crate::store::ReceiveOutcome;
-use crate::types::{Interaction, Outcome};
+use crate::types::{Interaction, InteractionKind, Outcome};
 
 use super::Valet;
 
@@ -36,6 +36,25 @@ pub async fn handle(valet: &Valet, interaction: Interaction, responder: Responde
         // composer, close again in case the first close never arrived.
         if !open_turn {
             close(valet, &interaction, Outcome::Received).await;
+        } else if interaction.kind == InteractionKind::Directive {
+            // Recovery may have sent the result while waiting for this redelivery
+            // to ack the directive. Try the close again after acking it.
+            let trigger = interaction.id;
+            match valet
+                .store
+                .with(move |s| -> crate::store::Result<_> {
+                    if s.has_sent_result(trigger)? {
+                        Ok(s.get_turn(trigger)?.and_then(|t| t.state.turn_outcome()))
+                    } else {
+                        Ok(None)
+                    }
+                })
+                .await
+            {
+                Ok(Some(outcome)) => valet.close_directive(trigger, outcome).await,
+                Ok(None) => {}
+                Err(e) => tracing::error!(turn = %trigger, "could not recover redelivered directive: {e}"),
+            }
         }
         return;
     }

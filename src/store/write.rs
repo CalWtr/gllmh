@@ -298,13 +298,29 @@ impl Store {
     /// End a running turn. The valet sends any owed result and closes the
     /// interaction. Resuming a running turn needs no state update.
     pub fn end_turn(&self, trigger: InteractionId, outcome: TurnOutcome) -> Result<()> {
+        Self::write_turn_end(&self.conn, trigger, outcome)
+    }
+
+    /// EXTENSION: checkpoint a directive's result text atomically with the end state.
+    pub fn end_directive(&mut self, trigger: InteractionId, outcome: TurnOutcome, text: Option<&str>) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        Self::write_turn_end(&tx, trigger, outcome)?;
+        tx.execute(
+            "INSERT INTO directive_end (trigger, result_text) VALUES (?1, ?2)",
+            params![trigger.to_string(), text],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn write_turn_end(conn: &Connection, trigger: InteractionId, outcome: TurnOutcome) -> Result<()> {
         let to = match outcome {
             TurnOutcome::Done => TurnState::Done,
             TurnOutcome::CutOff => TurnState::CutOff,
             TurnOutcome::Failed => TurnState::Failed,
             TurnOutcome::Interrupted => TurnState::Interrupted,
         };
-        let changed = self.conn.execute(
+        let changed = conn.execute(
             "UPDATE turn SET state = ?2, ended_at = ?3 WHERE trigger = ?1 AND state = 'running'",
             params![trigger.to_string(), to.as_str(), timestamp()],
         )?;
@@ -312,6 +328,48 @@ impl Store {
             return Err(Error::TurnTransition { trigger, to });
         }
         Ok(())
+    }
+
+    /// EXTENSION: recover ended directives until the broker has confirmed close.
+    /// A missing checkpoint is possible in a store written by an older valet.
+    pub fn unclosed_directives(&self) -> Result<Vec<(Interaction, Turn, Option<String>)>> {
+        let rows = read_all(
+            &self.conn,
+            "SELECT t.*, a.input, d.result_text
+             FROM turn t
+             JOIN action a ON a.interaction = t.trigger AND a.kind = 'receive'
+             LEFT JOIN directive_end d ON d.trigger = t.trigger
+             WHERE t.ended_at IS NOT NULL AND coalesce(d.closed, 0) = 0
+               AND json_extract(a.input, '$.kind') = 'directive'
+             ORDER BY t.rowid",
+            [],
+            |row| Ok((row.get::<_, String>("input")?, turn(row)?, row.get::<_, Option<String>>("result_text")?)),
+        )?;
+        rows.into_iter()
+            .map(|(input, turn, result_text)| Ok((serde_json::from_str(&input)?, turn, result_text)))
+            .collect()
+    }
+
+    /// EXTENSION: checkpoint the broker's idempotent close.
+    pub fn confirm_directive_close(&self, trigger: InteractionId) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO directive_end (trigger, closed) VALUES (?1, 1)
+             ON CONFLICT(trigger) DO UPDATE SET closed = 1",
+            [trigger.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn has_sent_result(&self, trigger: InteractionId) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM action
+                 WHERE turn = ?1 AND kind = 'send' AND state = 'succeeded'
+                   AND json_extract(input, '$.kind') = 'result' AND json_extract(input, '$.caused_by') = ?1
+             )",
+            [trigger.to_string()],
+            |row| row.get(0),
+        )?)
     }
 
     /// Replace a mark by target and key, or remove it when the value is JSON null.
