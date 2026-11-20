@@ -219,6 +219,57 @@ pub struct StatusArgs {
     pub socket: Option<PathBuf>,
 }
 
-pub async fn status(_args: StatusArgs) -> anyhow::Result<()> {
-    anyhow::bail!("gllmh status: not implemented (M6.2)")
+/// EXTENSION: socket connection failures are reported as `connection_failed` on stderr.
+pub async fn status(args: StatusArgs) -> anyhow::Result<()> {
+    let socket = args.socket.unwrap_or_else(paths::default_local_socket);
+    let stream = UnixStream::connect(&socket)
+        .await
+        .with_context(|| format!("connection_failed: connect to {}", socket.display()))?;
+    let (peer, mut incoming) = Peer::spawn_unix(stream);
+    let input = StatusInput { root: args.root };
+    let request = peer.request(local::STATUS, &input);
+    tokio::pin!(request);
+
+    let output: StatusOutput = loop {
+        tokio::select! {
+            result = &mut request => break match result {
+                Err(CallError::Closed) => Err(CallError::Closed).context("connection_failed"),
+                result => result.map_err(anyhow::Error::from),
+            }?,
+            Some(request) = incoming.next() => {
+                if request.op == local::NOTIFY {
+                    if let Some((_, responder)) = request.parse::<NotifyInput>() {
+                        responder.ok(NotifyOutput {});
+                    }
+                } else {
+                    request.responder.err(ErrorBody::new(codes::UNKNOWN_OP, request.op));
+                }
+            }
+        }
+    };
+    print(&mut tokio::io::stdout(), &status_table(output)).await?;
+    Ok(())
+}
+
+fn status_table(output: StatusOutput) -> String {
+    use std::fmt::Write;
+
+    let mut table = String::from("id\tkind\tfrom\tto\tstate\toutcome\thops\taccepted_at\tclosed_at\n");
+    for row in output.interactions {
+        writeln!(
+            table,
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            row.id,
+            row.kind.as_str(),
+            row.from,
+            row.to,
+            row.state.as_str(),
+            row.outcome.map_or("-", |value| value.as_str()),
+            row.hops,
+            row.accepted_at.to_rfc3339(),
+            row.closed_at.map_or_else(|| "-".into(), |time| time.to_rfc3339()),
+        )
+        .unwrap();
+    }
+    table
 }
