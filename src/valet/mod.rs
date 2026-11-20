@@ -25,6 +25,7 @@ mod deliver;
 mod local;
 mod recovery;
 mod send;
+mod services;
 mod store;
 mod tools;
 mod turns;
@@ -76,6 +77,7 @@ pub struct Valet {
     pub store: StoreHandle,
     pub broker: Peer,
     pub clients: Clients,
+    services: services::Services,
     executable_schemas: BTreeMap<PathBuf, tools::ExecutableSchema>,
     /// Flips to true once recovery is done; deliveries wait for it.
     recovered: watch::Sender<bool>,
@@ -120,6 +122,7 @@ pub async fn run(args: ValetArgs) -> anyhow::Result<()> {
     let (recovered, _) = watch::channel(false);
     let valet = Arc::new(Valet {
         user: args.user.clone(),
+        services: services::Services::new(profile.services.keys()),
         profile,
         edges: hello.edges,
         data_dir: data_dir.clone(),
@@ -137,6 +140,7 @@ pub async fn run(args: ValetArgs) -> anyhow::Result<()> {
 
     recovery::recover(&valet).await.context("recovery")?;
     let turns = turns::start(&valet).await.context("start turn engine")?;
+    services::listen(&valet).await.context("start services")?;
     let _local = local::listen(valet.clone(), &paths::local_socket(&data_dir)).await?;
     valet.recovered.send_replace(true);
 

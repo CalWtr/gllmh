@@ -27,6 +27,17 @@ CREATE INDEX IF NOT EXISTS action_turn_id ON action (turn, id);
 CREATE INDEX IF NOT EXISTS action_unfinished
     ON action (id) WHERE state IN ('requested', 'running');
 
+CREATE INDEX IF NOT EXISTS action_service_send_interaction
+    ON action (interaction) WHERE kind = 'send' AND service IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS service_result (
+    receive   TEXT NOT NULL PRIMARY KEY REFERENCES action (id),
+    service   TEXT NOT NULL,
+    forwarded INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS service_result_service ON service_result (service, forwarded DESC, receive);
+
 CREATE TABLE IF NOT EXISTS turn (
     trigger   TEXT NOT NULL PRIMARY KEY,
     root      TEXT NOT NULL,
