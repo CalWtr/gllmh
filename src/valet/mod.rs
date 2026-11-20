@@ -76,6 +76,7 @@ pub struct Valet {
     pub store: StoreHandle,
     pub broker: Peer,
     pub clients: Clients,
+    executable_schemas: BTreeMap<PathBuf, tools::ExecutableSchema>,
     /// Flips to true once recovery is done; deliveries wait for it.
     recovered: watch::Sender<bool>,
     /// Wakes the turn engine when a turn is queued or ends.
@@ -109,6 +110,7 @@ pub async fn run(args: ValetArgs) -> anyhow::Result<()> {
         bail!("broker says this socket belongs to {:?}, not {:?}", hello.user, args.user);
     }
     let profile: ResolvedUser = serde_json::from_value(hello.profile).context("resolved profile from hello")?;
+    let executable_schemas = tools::load_executable_schemas(&profile).await?;
     let data_dir = match &args.data_root {
         Some(root) => root.join(&args.user),
         None => paths::expand_home(&profile.user_data_store, &home_dir()),
@@ -125,6 +127,7 @@ pub async fn run(args: ValetArgs) -> anyhow::Result<()> {
         store,
         broker: peer,
         clients: Clients::default(),
+        executable_schemas,
         recovered,
         wake: tokio::sync::Notify::new(),
     });
