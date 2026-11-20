@@ -1,0 +1,17 @@
+[Unit]
+Description=GLLMH broker
+PartOf=gllmh.target
+Requires=gllmh-user-agent.socket gllmh-user-dispatch.socket gllmh-user-user.socket gllmh-user-worker_agent.socket
+
+[Service]
+Type=notify
+User=gllmh
+ExecStart=/usr/bin/gllmh serve --profile acceptance
+Sockets=gllmh-user-agent.socket gllmh-user-dispatch.socket gllmh-user-user.socket gllmh-user-worker_agent.socket
+StateDirectory=gllmh
+Restart=on-failure
+TimeoutStopSec=10
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=gllmh.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=GLLMH valet for user
+PartOf=gllmh.target
+Wants=gllmh-broker.service
+After=gllmh-broker.service
+
+[Service]
+Type=notify
+User=user
+ExecStart=/usr/bin/gllmh valet --user user
+WorkingDirectory=/home/gllmh-test/.gllmh
+Restart=on-failure
+TimeoutStopSec=10
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=gllmh.target
