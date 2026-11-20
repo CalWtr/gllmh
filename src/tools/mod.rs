@@ -2,3 +2,11 @@
 //! tool_profile): executables, send tools, MCP tools.
 //!
 //! Owner: M5.1 (executables, send tools), M5.3 (MCP tools).
+
+mod run;
+
+pub use run::{RunError, run};
+
+mod send;
+
+pub(crate) use send::{SendPayload, send_arguments, send_spec};
