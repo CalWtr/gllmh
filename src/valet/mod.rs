@@ -11,18 +11,22 @@
 //! - `send.rs` (M3.2): the one path every send takes (write-ahead, edge pre-check, broker).
 //! - `deliver.rs` (M3.2): recording deliveries; hands agent receives to the turn engine.
 //! - `local.rs` (M3.2): local.sock; M7.1 adds the service sockets beside it.
-//! - `recovery.rs` (M3.2 sends and actions; M4.3 turns).
-//! - `turns.rs` (M4.3): the turn engine. M6.1 sends results from it.
+//! - `recovery.rs` (M3.2): sends and actions. Turn recovery is in `turns.rs`.
+//! - `composer.rs` (M4.3): the composer child process.
+//! - `turns.rs` (M4.3): the turn engine. M6.1 sends results from its `on_turn_end` hook.
+//! - `tools.rs` (M4.3 seam): tool names, schemas and running a tool request; M5.1, M5.3 fill it.
 //!
 //! The valet's lifetime is bound to its broker connection: when the broker
 //! goes away, the valet exits non-zero and systemd restarts it, which runs
 //! recovery (docs/decisions.md).
 
+mod composer;
 mod deliver;
 mod local;
 mod recovery;
 mod send;
 mod store;
+mod tools;
 mod turns;
 
 use std::collections::BTreeMap;
@@ -42,6 +46,8 @@ use crate::types::Sender;
 pub use local::Clients;
 pub use send::SendRequest;
 pub use store::StoreHandle;
+pub use tools::{ToolCtx, ToolUse};
+pub use turns::TurnEnd;
 
 /// `gllmh valet --user <name>`.
 #[derive(Debug, Clone, clap::Args)]
@@ -72,6 +78,8 @@ pub struct Valet {
     pub clients: Clients,
     /// Flips to true once recovery is done; deliveries wait for it.
     recovered: watch::Sender<bool>,
+    /// Wakes the turn engine when a turn is queued or ends.
+    wake: tokio::sync::Notify,
 }
 
 impl Valet {
@@ -118,6 +126,7 @@ pub async fn run(args: ValetArgs) -> anyhow::Result<()> {
         broker: peer,
         clients: Clients::default(),
         recovered,
+        wake: tokio::sync::Notify::new(),
     });
 
     // Deliveries are accepted from here on but wait for recovery (section 5, step 2).
