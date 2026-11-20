@@ -37,7 +37,7 @@ pub async fn run(_args: ComposerArgs) -> anyhow::Result<()> {
     while let Some(result) = jobs.join_next().await {
         log_job_error(result);
     }
-    drop(peer);
+    drop((peer, incoming));
     writer.await?;
     Ok(())
 }

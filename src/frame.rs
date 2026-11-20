@@ -176,6 +176,8 @@ impl Drop for Responder {
 /// The other side's requests. Ends when the connection closes.
 pub struct Incoming {
     rx: mpsc::UnboundedReceiver<Request>,
+    /// Keeps the connection open while the other side's requests may still be served.
+    _keep: mpsc::UnboundedSender<Frame>,
 }
 
 impl Incoming {
@@ -199,7 +201,7 @@ impl Peer {
     }
 
     /// Like `spawn`, with a handle to wait for queued replies to flush after
-    /// input EOF. Drop the peer and finish all responders before awaiting it.
+    /// input EOF. Drop the peer, the `Incoming` and every responder before awaiting it.
     pub fn spawn_with_writer<R, W>(reader: R, writer: W) -> (Peer, Incoming, tokio::task::JoinHandle<()>)
     where
         R: AsyncRead + Unpin + Send + 'static,
@@ -211,10 +213,11 @@ impl Peer {
         let closed = Arc::new(AtomicBool::new(false));
 
         let writer = tokio::spawn(write_loop(writer, out_rx));
-        tokio::spawn(read_loop(reader, pending.clone(), closed.clone(), out_tx.clone(), in_tx));
+        tokio::spawn(read_loop(reader, pending.clone(), closed.clone(), out_tx.downgrade(), in_tx));
 
+        let incoming = Incoming { rx: in_rx, _keep: out_tx.clone() };
         let peer = Peer { out: out_tx, pending, closed, next_id: Arc::new(AtomicU64::new(1)) };
-        (peer, Incoming { rx: in_rx }, writer)
+        (peer, incoming, writer)
     }
 
     /// Split a unix stream and run it.
@@ -275,7 +278,8 @@ async fn read_loop<R: AsyncRead + Unpin>(
     reader: R,
     pending: Pending,
     closed: Arc<AtomicBool>,
-    out: mpsc::UnboundedSender<Frame>,
+    // Weak: the connection closes once every Peer, Incoming and Responder is gone.
+    out: mpsc::WeakUnboundedSender<Frame>,
     incoming: mpsc::UnboundedSender<Request>,
 ) {
     let mut lines = BufReader::new(reader).lines();
@@ -292,7 +296,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
                     .ok()
                     .and_then(|v| v.get("id").and_then(Value::as_str).map(str::to_string))
                 {
-                    let mut r = Responder { id, out: Some(out.clone()) };
+                    let mut r = Responder { id, out: out.upgrade() };
                     r.send(Err(ErrorBody::new(codes::BAD_FRAME, e.to_string())));
                 }
                 continue;
@@ -312,14 +316,14 @@ async fn read_loop<R: AsyncRead + Unpin>(
             let request = Request {
                 op,
                 input: frame.input.unwrap_or(Value::Null),
-                responder: Responder { id: frame.id, out: Some(out.clone()) },
+                responder: Responder { id: frame.id, out: out.upgrade() },
             };
             if incoming.send(request).is_err() {
                 // Nobody listens for requests on this side; the Request's
                 // responder answers `internal` as it drops.
             }
         } else {
-            let mut r = Responder { id: frame.id, out: Some(out.clone()) };
+            let mut r = Responder { id: frame.id, out: out.upgrade() };
             r.send(Err(ErrorBody::new(codes::BAD_FRAME, "frame has neither op nor re")));
         }
     }
@@ -419,6 +423,19 @@ mod tests {
         assert!(matches!(call.await.unwrap(), Err(CallError::Closed)));
         assert!(a.is_closed());
         assert!(matches!(a.request_raw("send", json!({})).await, Err(CallError::Closed)));
+    }
+
+    #[tokio::test]
+    async fn dropping_every_handle_closes_the_connection() {
+        let ((a, a_in), (b, _b_in)) = pair();
+        drop((a, a_in));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !b.is_closed() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the other side sees the close");
     }
 
     #[tokio::test]

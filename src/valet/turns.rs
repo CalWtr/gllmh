@@ -232,7 +232,10 @@ impl TurnRunner {
         let profile =
             self.valet.profile.llm_profiles.iter().find(|p| p.name == out.llm_profile).context("llm_profile")?.clone();
         let config: LlmConfig = serde_json::from_value(serde_json::to_value(&profile)?)?;
-        let thinking = out.thinking.unwrap_or(profile.thinking.on);
+        // A compose reply may ask for thinking; a model that never thinks
+        // (thinking.native = never) is not asked to (docs/decisions.md).
+        let thinking = out.thinking.unwrap_or(profile.thinking.on)
+            && profile.thinking.native != crate::profile::NativeThinking::Never;
         let specs = self.valet.tool_specs(&out.tools);
         let offered: Vec<String> = specs.iter().map(|s| s.name.clone()).collect();
 
