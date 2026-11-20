@@ -1,0 +1,5 @@
+{
+  "name": "send_message",
+  "builtin": "send_message",
+  "hazardness": "caution"
+}

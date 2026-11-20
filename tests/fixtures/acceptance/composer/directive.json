@@ -1,0 +1,7 @@
+{
+  "name": "directive",
+  "engine": "builtin",
+  "work_mode": "inst",
+  "max_parallel_turns": 2,
+  "builtin": { "mode": "directive" }
+}

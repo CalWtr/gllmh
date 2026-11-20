@@ -370,6 +370,7 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "libc",
  "reqwest",
  "rusqlite",
  "serde",

@@ -2,6 +2,13 @@
 //!
 //! Owner: M1.1. Unit generation (`gllmh build`) is `crate::units` (M1.2).
 
+mod model;
+mod system;
+mod validate;
+
+pub use model::*;
+pub use validate::{LoadedRuntime, Violation, validate};
+
 use crate::paths::ConfigDirArg;
 
 /// `gllmh check --profile <name>`.
@@ -17,6 +24,17 @@ pub struct CheckArgs {
     pub config: ConfigDirArg,
 }
 
-pub async fn check(_args: CheckArgs) -> anyhow::Result<()> {
-    anyhow::bail!("gllmh check: not implemented (M1.1)")
+pub async fn check(args: CheckArgs) -> anyhow::Result<()> {
+    let result =
+        tokio::task::spawn_blocking(move || validate(&args.config.config_dir, &args.profile, args.dev)).await?;
+    if let Err(violations) = result {
+        for violation in &violations {
+            eprintln!("{violation}");
+        }
+        anyhow::bail!("profile validation failed ({} violation(s))", violations.len());
+    }
+    Ok(())
 }
+
+#[cfg(test)]
+mod tests;

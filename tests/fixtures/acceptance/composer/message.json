@@ -1,0 +1,6 @@
+{
+  "name": "message",
+  "engine": "builtin",
+  "work_mode": "react",
+  "builtin": { "mode": "message" }
+}
