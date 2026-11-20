@@ -94,7 +94,8 @@ and give their system users access. Use Nix store paths for executables in
 profiles. Provider keys belong in agent-owned files outside the store.
 
 NixOS installs the profile copies under `/etc/gllmh` as `root:gllmh`, with
-`0750` directories and `0640` files. Change profiles in the host configuration
-and build a new generation so the generated units and installed profiles
-come from the same source. After activating a changed profile, restart
+`0750` directories and `0640` files. The build-time profile JSON also lives in
+the readable Nix store, so keep secret values out of profiles. Change profiles
+in the host configuration and build a new generation so the generated units
+and installed profiles come from the same source. After activating a changed profile, restart
 `gllmh.target` so the broker and valets load it.
