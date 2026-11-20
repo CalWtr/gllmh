@@ -21,6 +21,13 @@ pub fn now() -> Timestamp {
     Utc::now()
 }
 
+/// Deserialize a present JSON value, keeping an explicit null distinct from an omitted field.
+pub(crate) fn present_json<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error> {
+    serde_json::Value::deserialize(deserializer).map(Some)
+}
+
 /// Separator between a user and its service in a sender name.
 pub const SERVICE_SEP: &str = "::";
 
@@ -206,7 +213,7 @@ pub struct Interaction {
     pub caused_by: Option<InteractionId>,
     pub root: InteractionId,
     pub hops: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "present_json", skip_serializing_if = "Option::is_none")]
     pub body: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<Vec<Block>>,

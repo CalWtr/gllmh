@@ -75,7 +75,7 @@ pub struct SendInput {
     /// Required for a result: the directive it answers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caused_by: Option<InteractionId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "crate::types::present_json", skip_serializing_if = "Option::is_none")]
     pub body: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<Vec<Block>>,
