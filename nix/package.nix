@@ -4,7 +4,7 @@ let
   tests = kind == "tests";
   services = kind == "acceptance-services";
 in
-rustPlatform.buildRustPackage {
+rustPlatform.buildRustPackage ({
   pname = if tests then "gllmh-cargo-test" else if services then "gllmh-acceptance-services" else "gllmh";
   version = "0.1.0";
 
@@ -23,8 +23,6 @@ rustPlatform.buildRustPackage {
   cargoBuildFlags = if services then [
     "--example" "timer_service" "--example" "draft_dispatcher"
   ] else [ "--bin" "gllmh" ];
-  cargoBuildType = if tests then "debug" else "release";
-  cargoCheckType = "debug";
   doCheck = tests;
 
   nativeBuildInputs = lib.optionals tests [ systemd ];
@@ -46,4 +44,4 @@ rustPlatform.buildRustPackage {
     license = lib.licenses.mit;
     platforms = lib.platforms.linux;
   } // lib.optionalAttrs (!services && !tests) { mainProgram = "gllmh"; };
-}
+} // lib.optionalAttrs tests { buildType = "debug"; })
