@@ -1,0 +1,13 @@
+{
+  "id":"msg_1",
+  "content":[
+    { "signature" : "sig", "thinking": "Check \u2603",  "type": "thinking"
+    },
+    {"data": "encrypted",   "type" : "redacted_thinking"},
+    {"type":"text","text":"Looking up the answer"},
+    {"type":"tool_use","id":"call_1","name":"lookup","input":{"term":"snow"}},
+    {"type":"tool_use","id":"call_2","name":"lookup","input":{"term":"ice"}}
+  ],
+  "stop_reason":"tool_use",
+  "usage":{"input_tokens":17,"output_tokens":4,"cache_creation_input_tokens":2,"cache_read_input_tokens":6}
+}

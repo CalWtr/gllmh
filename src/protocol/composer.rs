@@ -121,9 +121,13 @@ pub struct ContentBlock {
     /// tool_use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arguments: Option<serde_json::Value>,
-    /// thinking: the provider's block, replayed byte-exact.
+    /// thinking: the provider's block as JSON.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<serde_json::Value>,
+    /// EXTENSION: exact JSON spelling of `raw` for replay through JSON-lines
+    /// and intermediate JSON values, which would otherwise reserialize it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_json: Option<String>,
     /// EXTENSION: tool_result only. True when the tool failed, was denied, or
     /// the broker refused the send; providers mark the result as an error.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -153,7 +157,16 @@ impl ContentBlock {
     }
 
     fn empty(kind: BlockType) -> Self {
-        Self { kind, text: None, call_id: None, tool: None, arguments: None, raw: None, is_error: false }
+        Self {
+            kind,
+            text: None,
+            call_id: None,
+            tool: None,
+            arguments: None,
+            raw: None,
+            raw_json: None,
+            is_error: false,
+        }
     }
 }
 
