@@ -1,4 +1,4 @@
-{ lib, stdenv, rustPlatform, systemd, kind ? "gllmh" }:
+{ lib, stdenv, rustPlatform, kind ? "gllmh" }:
 
 let
   tests = kind == "tests";
@@ -23,9 +23,9 @@ rustPlatform.buildRustPackage ({
   cargoBuildFlags = if services then [
     "--example" "timer_service" "--example" "draft_dispatcher"
   ] else [ "--bin" "gllmh" ];
+  # Leave the host-only systemd-analyze verifier out of the sandbox PATH.
   doCheck = tests;
 
-  nativeBuildInputs = lib.optionals tests [ systemd ];
   preCheck = ''
     # The acceptance service tests invoke Cargo to build the examples.
     export CARGO_NET_OFFLINE=true
