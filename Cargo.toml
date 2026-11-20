@@ -10,12 +10,15 @@ publish = false
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4", features = ["derive", "env"] }
+eventsource-stream = "0.2"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 libc = "0.2"
 rand = "0.9"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "system-proxy"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "system-proxy"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
+shell-words = "1"
 shlex = "2"
 strum = { version = "0.27", features = ["derive"] }
 thiserror = "2"
