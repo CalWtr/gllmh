@@ -1,0 +1,16 @@
+{
+  "name": "anthropic",
+  "protocol": "anthropic",
+  "model_id": "claude-sonnet-4-6",
+  "base_url": "https://api.anthropic.com",
+  "api_key_file": "/etc/gllmh-keys/anthropic",
+  "thinking": {
+    "native": "optional",
+    "on": true,
+    "returned": "summary",
+    "replay": "required"
+  },
+  "context_window": 200000,
+  "max_output": 4096,
+  "tuning": []
+}

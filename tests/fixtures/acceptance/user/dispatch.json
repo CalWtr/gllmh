@@ -1,0 +1,12 @@
+{
+  "name": "dispatch",
+  "system_user": "dispatch",
+  "services": {
+    "draft_dispatcher": {
+      "command": "/usr/bin/gllmh-draft-dispatcher",
+      "args": [],
+      "restart": "on_failure",
+      "required": true
+    }
+  }
+}

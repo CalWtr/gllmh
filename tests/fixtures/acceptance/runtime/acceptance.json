@@ -1,0 +1,13 @@
+{
+  "name": "acceptance",
+  "users": ["user", "agent", "worker_agent", "dispatch"],
+  "allow_messages": {
+    "agent::timer": ["agent"],
+    "agent": ["user"]
+  },
+  "allow_directives": {
+    "agent": ["worker_agent"],
+    "dispatch::draft_dispatcher": ["worker_agent"]
+  },
+  "restart": "on_failure"
+}

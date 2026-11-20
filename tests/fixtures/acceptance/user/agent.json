@@ -1,0 +1,15 @@
+{
+  "name": "agent",
+  "system_user": "agent",
+  "services": {
+    "timer": {
+      "command": "/usr/bin/gllmh-timer",
+      "args": [],
+      "restart": "on_failure",
+      "required": true
+    }
+  },
+  "composer_profile": "message",
+  "llm_profiles": ["anthropic"],
+  "tool_profiles": ["send_message", "send_directive"]
+}

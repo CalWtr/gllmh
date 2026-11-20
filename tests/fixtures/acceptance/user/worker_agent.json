@@ -1,0 +1,6 @@
+{
+  "name": "worker_agent",
+  "system_user": "worker_agent",
+  "composer_profile": "directive",
+  "llm_profiles": ["anthropic"]
+}
