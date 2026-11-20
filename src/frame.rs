@@ -194,16 +194,27 @@ impl Peer {
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
+        let (peer, incoming, _) = Self::spawn_with_writer(reader, writer);
+        (peer, incoming)
+    }
+
+    /// Like `spawn`, with a handle to wait for queued replies to flush after
+    /// input EOF. Drop the peer and finish all responders before awaiting it.
+    pub fn spawn_with_writer<R, W>(reader: R, writer: W) -> (Peer, Incoming, tokio::task::JoinHandle<()>)
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
         let (out_tx, out_rx) = mpsc::unbounded_channel::<Frame>();
         let (in_tx, in_rx) = mpsc::unbounded_channel::<Request>();
         let pending: Pending = Arc::default();
         let closed = Arc::new(AtomicBool::new(false));
 
-        tokio::spawn(write_loop(writer, out_rx));
+        let writer = tokio::spawn(write_loop(writer, out_rx));
         tokio::spawn(read_loop(reader, pending.clone(), closed.clone(), out_tx.clone(), in_tx));
 
         let peer = Peer { out: out_tx, pending, closed, next_id: Arc::new(AtomicU64::new(1)) };
-        (peer, Incoming { rx: in_rx })
+        (peer, Incoming { rx: in_rx }, writer)
     }
 
     /// Split a unix stream and run it.
