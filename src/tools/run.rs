@@ -24,11 +24,16 @@ pub enum RunError {
 
 /// Start one tool process. Its deadline covers stdin, stdout, stderr and exit.
 pub async fn run(bin: &Path, input: RunInput) -> Result<RunOutput, RunError> {
+    run_with_args(bin, &[], input).await
+}
+
+pub(super) async fn run_with_args(bin: &Path, args: &[&str], input: RunInput) -> Result<RunOutput, RunError> {
     let not_executable = |source| RunError::NotExecutable { bin: bin.to_owned(), source };
     // Resolve the configured file before setting the child's cwd.
     let bin = std::path::absolute(bin).map_err(not_executable)?;
     let arguments = serde_json::to_vec(&input.arguments).expect("JSON arguments");
     let mut child = Command::new(&bin)
+        .args(args)
         .current_dir(input.cwd)
         .envs(input.env)
         .stdin(Stdio::piped())
