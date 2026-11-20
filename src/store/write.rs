@@ -105,7 +105,20 @@ impl Store {
     /// Commit the write-ahead row before running the action. Use
     /// [`Self::record_receive`] for broker deliveries.
     pub fn request_action(&mut self, request: ActionRequest) -> Result<ActionId> {
+        self.request_action_with(request, |_| None)
+    }
+
+    /// Like [`Self::request_action`], but `input` may build the stored input
+    /// from the new action's id (a send's `client_ref` is its own action id).
+    pub fn request_action_with(
+        &mut self,
+        mut request: ActionRequest,
+        input: impl FnOnce(ActionId) -> Option<Value>,
+    ) -> Result<ActionId> {
         let id = self.next_id()?;
+        if let Some(value) = input(id) {
+            request.input = value;
+        }
         self.conn.execute(
             "INSERT INTO action (id, kind, turn, step, requested_by, call_id, service, interaction, root, input,
                                  hazardness, state, requested_at)

@@ -1,0 +1,10 @@
+{
+  "name": "pair",
+  "users": ["alice", "bob"],
+  "allow_messages": {
+    "alice": ["bob"],
+    "bob": ["alice"]
+  },
+  "allow_directives": {},
+  "restart": "never"
+}

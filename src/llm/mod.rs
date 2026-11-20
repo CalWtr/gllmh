@@ -14,7 +14,7 @@ use serde_json::{Value, value::RawValue};
 
 use crate::protocol::composer::{ContentBlock, Message};
 
-pub use http::call;
+pub use http::{call, call_body};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LlmConfig {

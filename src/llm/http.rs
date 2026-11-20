@@ -23,6 +23,14 @@ pub async fn call(
     call_with_client(config, &body, &client, BASE_DELAY).await
 }
 
+/// Send a body already built with [super::build_request] (and recorded), with
+/// the same retries as [call]. The valet uses this so the recorded request is
+/// exactly the one sent.
+pub async fn call_body(config: &LlmConfig, body: &str) -> Result<LlmResponse, LlmError> {
+    let client = client_builder().build().map_err(transport_error)?;
+    call_with_client(config, body, &client, BASE_DELAY).await
+}
+
 pub(super) fn client_builder() -> ClientBuilder {
     Client::builder().redirect(reqwest::redirect::Policy::none()).retry(reqwest::retry::never())
 }
