@@ -1,0 +1,17 @@
+[Unit]
+Description=GLLMH valet for dispatch
+PartOf=gllmh.target
+Wants=gllmh-broker.service
+After=gllmh-broker.service
+
+[Service]
+Type=notify
+User=dispatch
+ExecStart=/usr/bin/gllmh valet --user dispatch
+WorkingDirectory=/home/gllmh-test/.gllmh
+Restart=on-failure
+TimeoutStopSec=10
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=gllmh.target

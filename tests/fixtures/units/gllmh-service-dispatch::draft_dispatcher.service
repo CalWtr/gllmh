@@ -1,0 +1,15 @@
+[Unit]
+Description=GLLMH service dispatch::draft_dispatcher
+PartOf=gllmh.target
+BindsTo=gllmh-valet-dispatch.service
+After=gllmh-valet-dispatch.service
+
+[Service]
+User=dispatch
+ExecStart=/usr/bin/gllmh-draft-dispatcher
+Environment=GLLMH_SERVICE_SOCKET=/home/gllmh-test/.gllmh/services/draft_dispatcher.sock
+Environment=GLLMH_SERVICE_CONFIG=/home/gllmh-test/.gllmh/services/draft_dispatcher.json
+Restart=on-failure
+
+[Install]
+RequiredBy=gllmh.target

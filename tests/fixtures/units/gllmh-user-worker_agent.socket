@@ -1,0 +1,12 @@
+[Unit]
+PartOf=gllmh.target
+
+[Socket]
+ListenStream=/run/gllmh/users/worker_agent.sock
+SocketUser=worker_agent
+SocketMode=0600
+FileDescriptorName=worker_agent
+Service=gllmh-broker.service
+
+[Install]
+WantedBy=gllmh.target

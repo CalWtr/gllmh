@@ -1,0 +1,12 @@
+[Unit]
+PartOf=gllmh.target
+
+[Socket]
+ListenStream=/run/gllmh/users/dispatch.sock
+SocketUser=dispatch
+SocketMode=0600
+FileDescriptorName=dispatch
+Service=gllmh-broker.service
+
+[Install]
+WantedBy=gllmh.target

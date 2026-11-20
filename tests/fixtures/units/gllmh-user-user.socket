@@ -1,0 +1,12 @@
+[Unit]
+PartOf=gllmh.target
+
+[Socket]
+ListenStream=/run/gllmh/users/user.sock
+SocketUser=user
+SocketMode=0600
+FileDescriptorName=user
+Service=gllmh-broker.service
+
+[Install]
+WantedBy=gllmh.target

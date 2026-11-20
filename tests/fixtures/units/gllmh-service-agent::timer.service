@@ -1,0 +1,15 @@
+[Unit]
+Description=GLLMH service agent::timer
+PartOf=gllmh.target
+BindsTo=gllmh-valet-agent.service
+After=gllmh-valet-agent.service
+
+[Service]
+User=agent
+ExecStart=/usr/bin/gllmh-timer
+Environment=GLLMH_SERVICE_SOCKET=/home/gllmh-test/.gllmh/services/timer.sock
+Environment=GLLMH_SERVICE_CONFIG=/home/gllmh-test/.gllmh/services/timer.json
+Restart=on-failure
+
+[Install]
+RequiredBy=gllmh.target
