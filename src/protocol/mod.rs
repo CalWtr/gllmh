@@ -10,6 +10,7 @@
 pub mod broker;
 pub mod composer;
 pub mod local;
+pub mod records;
 pub mod tool;
 
 /// The protocol version `hello` carries.
