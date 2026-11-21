@@ -6,7 +6,7 @@
       "command": "/usr/bin/gllmh-timer",
       "args": [],
       "restart": "on_failure",
-      "required": true
+      "required": false
     }
   },
   "composer_profile": "message",

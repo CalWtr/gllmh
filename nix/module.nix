@@ -62,7 +62,7 @@ let
         if [ -f "$unit" ]; then
           awk '
             /^WantedBy=gllmh[.]target$/ { print "Wants=" FILENAME }
-            /^RequiredBy=gllmh[.]target$/ { print "Requires=" FILENAME }
+            /^UpheldBy=gllmh[.]target$/ { print "Upholds=" FILENAME }
           ' "$unit"
         fi
       done

@@ -89,7 +89,7 @@ fn acceptance_with_absolute_paths() -> LoadedRuntime {
 }
 
 #[test]
-fn services_select_required_by_or_wanted_by_and_preserve_arguments() {
+fn services_select_upheld_by_or_wanted_by_and_preserve_arguments() {
     let mut loaded = acceptance_with_absolute_paths();
     let agent = loaded.users.get_mut("agent").unwrap();
     agent.cwd = Some("/work/valet directory".into());
@@ -97,11 +97,12 @@ fn services_select_required_by_or_wanted_by_and_preserve_arguments() {
     let timer = agent.services.get_mut("timer").unwrap();
     timer.cwd = Some("/work/service directory".into());
     timer.restart = Restart::Never;
+    timer.required = true;
     timer.args = ["", "two words", "a\"b", "a'b", r"a\b", ";", "${HOME}", "%n", "a\nb"].map(String::from).to_vec();
     loaded.users.get_mut("dispatch").unwrap().services.get_mut("draft_dispatcher").unwrap().required = false;
     let units = generate(&loaded, Path::new("/bin with spaces/gllmh")).into_iter().collect::<BTreeMap<_, _>>();
     let timer = &units["gllmh-service-agent::timer.service"];
-    assert!(timer.ends_with("[Install]\nRequiredBy=gllmh.target\n"));
+    assert!(timer.ends_with("[Install]\nUpheldBy=gllmh.target\n"));
     assert!(timer.contains("WorkingDirectory=/work/service directory\n"));
     assert!(timer.contains("Restart=no\n"));
     assert!(timer.contains("Environment=\"GLLMH_SERVICE_SOCKET=/data/agent state/services/timer.sock\"\n"));
@@ -140,7 +141,7 @@ fn systemd_accepts_generated_units_including_double_colons() {
         // Load installed services through the target. The verify CLI interprets colons
         // in a positional path as alias syntax, while the unit loader accepts them.
         for (install, dependency) in
-            [("RequiredBy=gllmh.target", "gllmh.target.requires"), ("WantedBy=gllmh.target", "gllmh.target.wants")]
+            [("UpheldBy=gllmh.target", "gllmh.target.upholds"), ("WantedBy=gllmh.target", "gllmh.target.wants")]
         {
             if contents.lines().any(|line| line == install) {
                 let dependency_dir = dir.path().join(dependency);

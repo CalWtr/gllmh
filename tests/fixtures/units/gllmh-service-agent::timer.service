@@ -12,4 +12,4 @@ Environment=GLLMH_SERVICE_CONFIG=/home/gllmh-test/.gllmh/services/timer.json
 Restart=on-failure
 
 [Install]
-RequiredBy=gllmh.target
+WantedBy=gllmh.target
