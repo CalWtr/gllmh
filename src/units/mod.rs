@@ -131,7 +131,9 @@ pub fn generate(loaded: &LoadedRuntime, bin: &Path) -> Vec<(String, String)> {
             let config = paths::service_config(&user.user_data_store, service_name);
             let socket = word(&format!("GLLMH_SERVICE_SOCKET={}", socket.display()));
             let config = word(&format!("GLLMH_SERVICE_CONFIG={}", config.display()));
-            let install = if service.required { "RequiredBy" } else { "WantedBy" };
+            // Upheld, not required: a restart of the service must not propagate to the
+            // target and from there to every valet (docs/decisions.md, A4 follow-up).
+            let install = if service.required { "UpheldBy" } else { "WantedBy" };
             let restart = restart(service.restart);
             units.push((
                 paths::service_unit(name, service_name),

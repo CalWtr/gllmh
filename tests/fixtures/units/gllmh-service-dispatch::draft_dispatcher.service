@@ -12,4 +12,4 @@ Environment=GLLMH_SERVICE_CONFIG=/home/gllmh-test/.gllmh/services/draft_dispatch
 Restart=on-failure
 
 [Install]
-RequiredBy=gllmh.target
+UpheldBy=gllmh.target
